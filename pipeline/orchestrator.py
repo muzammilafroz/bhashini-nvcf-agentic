@@ -6,20 +6,30 @@ import sys
 
 from pipeline.change_detector import ChangeDetector
 from pipeline.deployment_planner import DeploymentPlanner
-from pipeline.nvcf_deploy import NVCFDeployer
-from mock_nvcf.deploy_client import NVCFDeployClient
 from pipeline.agents.canary_health import check_canary_health
+from pipeline.providers import get_provider
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 async def run_pipeline(mode: str, repo_root: Path):
+    import os
+    from dotenv import load_dotenv
+    load_dotenv(repo_root / ".env")
+    
     cd = ChangeDetector(repo_root)
     planner = DeploymentPlanner(repo_root)
     
-    # We are using mock client
-    client = NVCFDeployClient(mock=True)
-    deployer = NVCFDeployer(client)
+    provider_name = os.getenv("CLOUD_PROVIDER", "MOCK_NVCF")
+    logger.info(f"Using Cloud Provider: {provider_name}")
+    
+    if provider_name == "MOCK_NVCF":
+        from pipeline.nvcf_deploy import NVCFDeployer
+        from mock_nvcf.deploy_client import NVCFDeployClient
+        client = NVCFDeployClient(mock=True)
+        provider = NVCFDeployer(client) # Keeping backward compatibility for v1
+    else:
+        provider = get_provider(provider_name)
     
     logger.info(f"Running pipeline in {mode} mode...")
     
@@ -42,10 +52,15 @@ async def run_pipeline(mode: str, repo_root: Path):
         logger.info(f"Planned deploy for {name} with image {image}")
         
         # 3. Deploy
-        fn_id, v_id = await deployer.deploy_model(name, image, spec, change_type)
-        
-        # 4. Canary Gate (reading settings from plan, hardcoded router url for prototype)
-        # Ideally we'd parse canary settings from model.yaml inside the planner
+        if provider_name == "MOCK_NVCF":
+            # Backward compatibility with v1 mock orchestrator
+            fn_id, v_id = await provider.deploy_model(name, image, spec, change_type)
+        else:
+            # v2/v3 Generic Provider implementation
+            v_id = provider.deploy_model(name, image, spec)
+            fn_id = name # GCP uses service name as fn_id essentially
+            
+        # 4. Canary Gate (reading settings from plan)
         import yaml
         yaml_path = repo_root / "models" / model_name / "model.yaml"
         with open(yaml_path, "r", encoding="utf-8") as f:
@@ -53,6 +68,11 @@ async def run_pipeline(mode: str, repo_root: Path):
             
         if data.get("canary", {}).get("enabled", False):
             canary = data["canary"]
+            
+            # If using generic provider, route traffic via the provider's API
+            if provider_name != "MOCK_NVCF":
+                provider.route_traffic(v_id, canary.get("weight", 10))
+            
             await check_canary_health(
                 model_name=name,
                 fn_id=fn_id,
@@ -61,6 +81,10 @@ async def run_pipeline(mode: str, repo_root: Path):
                 promote_after_seconds=canary.get("promote_after_seconds", 120),
                 rollback_on=canary.get("rollback_on", {})
             )
+            
+            if provider_name != "MOCK_NVCF":
+                # Assuming health check passed if we reach here (no exception raised)
+                provider.route_traffic(v_id, 100)
             
     logger.info("Pipeline completed.")
 
