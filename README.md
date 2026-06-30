@@ -1,10 +1,16 @@
 # bhashini-nvcf-agentic
 
-A CPU-only, $0 prototype demonstrating the GitOps deployment-automation loop for BHASHINI models on NVIDIA Cloud Functions (NVCF).
+A multi-phase prototype demonstrating the GitOps deployment-automation loop for BHASHINI models.
 
-This prototype highlights an **honest** approach to canary deployments on NVCF. Because NVCF does not provide a native traffic-splitting API, this repository includes an external weighted traffic router and a health-gated orchestrator.
+## Versions
 
-## Architecture
+* **v1 (Current)**: A CPU-only, $0 local prototype. Uses a mock NVCF control plane and a local SQLite-backed canary router. 
+* **v2 (Upcoming)**: Production-like, internet-facing architecture. Uses a DigitalOcean Droplet for the edge (Kong API Gateway & Prometheus Observability) and **Google Cloud Platform (GCP)** as the actual GPU compute provider.
+* **v3 (Planned)**: Full multi-cloud abstraction. Ability to swap between NVCF, GCP, AWS, and Azure seamlessly with minimal manual effort using an Adapter pattern in the deployment pipeline.
+
+## v1 Architecture (Local Prototype)
+
+This prototype highlights an **honest** approach to canary deployments on cloud providers that lack native traffic-splitting APIs (like NVCF). 
 
 ```mermaid
 graph TD
@@ -31,13 +37,7 @@ graph TD
     L -->|weight: 100| F
 ```
 
-## Production Migration
-
-Moving from this prototype to production NVCF involves two changes:
-1. **API Client**: In `pipeline/orchestrator.py` and `mock_nvcf/deploy_client.py`, swap the `mock=True` flag to false and supply your `NVCF_API_KEY`. The payload shapes are identical.
-2. **Router**: The `router/gateway.py` logic (weighted probability split) should be migrated to an API Gateway like Envoy, Kong, or APISIX running at the edge of your cloud VPC. The health gate (`pipeline/agents/canary_health.py`) will poll your gateway's Prometheus/Datadog metrics instead of the mock SQLite DB.
-
-## Local Quick Start
+## Local Quick Start (v1)
 
 This project requires Python 3.12+.
 
@@ -62,5 +62,5 @@ python pipeline/orchestrator.py --mode full
 - `mock_nvcf/`: FastAPI mock of the NVCF REST API.
 - `router/`: External traffic-split gateway and metrics database.
 - `pipeline/`: Agents for diff detection, planning, and deployment.
-- `model_server/`: Actual CTranslate2 model server (meant for Codespaces).
+- `model_server/`: Actual translation model server.
 - `.agents/skills/`: The Antigravity skills that defined this architecture.
