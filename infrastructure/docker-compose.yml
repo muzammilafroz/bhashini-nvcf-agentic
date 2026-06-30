@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  # The API Gateway (Kong)
+  kong-db:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: kong
+      POSTGRES_DB: kong
+      POSTGRES_PASSWORD: kong_pass
+    volumes:
+      - kong_data:/var/lib/postgresql/data
+    networks:
+      - edge_net
+
+  kong-migrations:
+    image: kong:3.3.0
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-db
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: kong_pass
+    command: kong migrations bootstrap
+    restart: on-failure
+    depends_on:
+      - kong-db
+    networks:
+      - edge_net
+
+  kong:
+    image: kong:3.3.0
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-db
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: kong_pass
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    depends_on:
+      - kong-migrations
+    networks:
+      - edge_net
+
+  # Observability (Prometheus)
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prom_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - edge_net
+
+  # Observability (Grafana)
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - edge_net
+
+volumes:
+  kong_data:
+  prom_data:
+  grafana_data:
+
+networks:
+  edge_net:
+    driver: bridge
