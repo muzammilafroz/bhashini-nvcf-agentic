@@ -1,0 +1,31 @@
+# Virtual environment
+.venv/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment variables (never commit real secrets)
+.env
+
+# SQLite databases (prototype stand-in for TimescaleDB)
+*.sqlite
+*.db
+
+# Model weights and artifacts (too large for git)
+*.bin
+*.pt
+ct2_model/
+data/raw/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# IDE
+.idea/
+*.swp

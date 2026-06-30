@@ -1,0 +1,24 @@
+schema_version: "1.0"
+name: en-hi-indictrans
+type: hf-mt
+image: ghcr.io/muzammilafroz/en-hi-indictrans:${GIT_SHA}
+gpu:
+  type: CPU
+  count: 0
+ports:
+  http: 8000
+scaling:
+  min_instances: 1
+  max_instances: 2
+  concurrency: 4
+canary:
+  enabled: true
+  initial_traffic_pct: 10
+  promote_after_seconds: 120
+  rollback_on:
+    p95_latency_ms: 1500
+    error_rate_pct: 2.0
+    wer_delta_pct: 5.0
+smoke_test:
+  input_fixture: tests/fixtures/hello.txt
+  max_latency_ms: 2000

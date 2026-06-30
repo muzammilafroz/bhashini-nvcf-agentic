@@ -1,0 +1,45 @@
+name: Deploy Model to NVCF (Mock)
+
+on:
+  push:
+    paths:
+      - 'models/**'
+      - 'pipeline/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Needed for git diff in change detector
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || pip install fastapi uvicorn httpx pydantic pyyaml jsonschema gitpython
+
+      - name: Run Background Mock Services (Mock NVCF & Router)
+        run: |
+          uvicorn mock_nvcf.app:app --port 8000 &
+          uvicorn router.gateway:app --port 8001 &
+          sleep 3
+
+      - name: Run Pipeline Orchestrator
+        env:
+          GIT_SHA: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # For prototype, we run in full mode locally within CI.
+          # The mock deployer and mock canary gate will run.
+          python pipeline/orchestrator.py --mode full
