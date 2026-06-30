@@ -4,3 +4,4 @@ ctranslate2
 transformers
 sentencepiece
 torch
+sacremoses

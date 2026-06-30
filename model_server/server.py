@@ -1,17 +1,17 @@
 import logging
 from fastapi import FastAPI
 from pydantic import BaseModel
-from transformers import pipeline
+from transformers import MarianMTModel, MarianTokenizer
+import torch
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="IndicTrans2 (Fallback) Server")
 
-# Load the real model at startup!
-# Using the fallback model from the skill since IndicTrans2 requires a gated HF login.
-# This runs entirely on CPU.
-logger.info("Loading Hugging Face model: Helsinki-NLP/opus-mt-en-hi...")
-translator = pipeline("translation", model="Helsinki-NLP/opus-mt-en-hi", device="cpu")
+model_name = "Helsinki-NLP/opus-mt-en-hi"
+logger.info(f"Loading tokenizer and model: {model_name}...")
+tokenizer = MarianTokenizer.from_pretrained(model_name)
+model = MarianMTModel.from_pretrained(model_name)
 logger.info("Model loaded successfully!")
 
 class TranslateRequest(BaseModel):
@@ -27,8 +27,10 @@ async def infer(req: TranslateRequest):
     logger.info(f"Translating: {req.text} from {req.src_lang} to {req.tgt_lang}")
     
     # Run the real model
-    result = translator(req.text)
-    translated_text = result[0]['translation_text']
+    inputs = tokenizer(req.text, return_tensors="pt", padding=True)
+    with torch.no_grad():
+        translated = model.generate(**inputs)
+    translated_text = tokenizer.decode(translated[0], skip_special_tokens=True)
     
     return {"translation": translated_text}
 
