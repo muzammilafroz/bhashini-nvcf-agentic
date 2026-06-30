@@ -3,3 +3,4 @@ uvicorn
 ctranslate2
 transformers
 sentencepiece
+torch

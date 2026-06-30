@@ -1,17 +1,18 @@
 import logging
-import os
-from typing import Literal
-
 from fastapi import FastAPI
 from pydantic import BaseModel
+from transformers import pipeline
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="IndicTrans2 Server")
+app = FastAPI(title="IndicTrans2 (Fallback) Server")
 
-# Optional: Add CTranslate2 and transformers loading logic here.
-# Because this is for a demo, if we want a fast fallback we can use a stub
-# if the model isn't downloaded yet.
+# Load the real model at startup!
+# Using the fallback model from the skill since IndicTrans2 requires a gated HF login.
+# This runs entirely on CPU.
+logger.info("Loading Hugging Face model: Helsinki-NLP/opus-mt-en-hi...")
+translator = pipeline("translation", model="Helsinki-NLP/opus-mt-en-hi", device="cpu")
+logger.info("Model loaded successfully!")
 
 class TranslateRequest(BaseModel):
     text: str
@@ -21,13 +22,15 @@ class TranslateRequest(BaseModel):
 @app.post("/infer")
 async def infer(req: TranslateRequest):
     """
-    Mock inference endpoint.
-    In the real codespace, this would invoke the CTranslate2 model.
+    Real inference endpoint.
     """
     logger.info(f"Translating: {req.text} from {req.src_lang} to {req.tgt_lang}")
     
-    # Very crude mock response for local testing without the heavy model
-    return {"translation": f"[MOCK {req.tgt_lang}] {req.text}"}
+    # Run the real model
+    result = translator(req.text)
+    translated_text = result[0]['translation_text']
+    
+    return {"translation": translated_text}
 
 @app.get("/health")
 async def health():
