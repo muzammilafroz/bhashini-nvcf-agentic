@@ -18,14 +18,19 @@ class GCPProvider(CloudProvider):
         
         service_name = f"bhashini-{model_id.replace('_', '-')}"
         # We use a timestamp to force a new revision if needed, or rely on image digest
+        # We use Cloud Build to build directly from the model_server directory
+        # and pass the model_id as an environment variable so the generic server serves the right model.
+        # This avoids needing to manually docker push to Artifact Registry first.
         
-        # Example gcloud command:
-        # gcloud run deploy bhashini-en-hi --image=image_uri --region=us-central1 --allow-unauthenticated
+        # Path to model_server (assuming script runs from repo root)
+        source_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "model_server"))
+        
         cmd = [
             "gcloud", "run", "deploy", service_name,
-            f"--image={image_uri}",
+            f"--source={source_dir}",
             f"--region={self.region}",
             f"--project={self.project_id}",
+            f"--set-env-vars=MODEL_NAME={config.get('hf_repo', 'Helsinki-NLP/opus-mt-en-hi')}",
             "--allow-unauthenticated",
             "--format=json"
         ]
