@@ -10,6 +10,8 @@ def get_provider(provider_name: str) -> CloudProvider:
     elif provider_name == "AWS":
         return AWSProvider()
     elif provider_name == "NVCF":
-        return NVCFProvider()
+        return NVCFProvider(mock=False)
+    elif provider_name == "MOCK_NVCF":
+        return NVCFProvider(mock=True)
     else:
         raise ValueError(f"Unknown provider: {provider_name}")

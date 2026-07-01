@@ -1,8 +1,8 @@
 import argparse
 import asyncio
 import logging
+import os
 from pathlib import Path
-import sys
 
 from pipeline.change_detector import ChangeDetector
 from pipeline.deployment_planner import DeploymentPlanner
@@ -13,7 +13,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 async def run_pipeline(mode: str, repo_root: Path):
-    import os
     from dotenv import load_dotenv
     load_dotenv(repo_root / ".env")
     
@@ -22,26 +21,34 @@ async def run_pipeline(mode: str, repo_root: Path):
     
     provider_name = os.getenv("CLOUD_PROVIDER", "MOCK_NVCF")
     logger.info(f"Using Cloud Provider: {provider_name}")
-    
-    if provider_name == "MOCK_NVCF":
-        from pipeline.nvcf_deploy import NVCFDeployer
-        from mock_nvcf.deploy_client import NVCFDeployClient
-        client = NVCFDeployClient(mock=True)
-        provider = NVCFDeployer(client) # Keeping backward compatibility for v1
-    else:
-        provider = get_provider(provider_name)
+    provider = get_provider(provider_name)
     
     logger.info(f"Running pipeline in {mode} mode...")
     
-    # 1. Detect Changes
-    if mode in ("full", "config-only"):
-        # We would normally diff HEAD~1..HEAD, but for the prototype local run we'll fake it
-        # and assume en-hi-indictrans has changed.
-        changes = {"en-hi-indictrans": "rebuild" if mode == "full" else "config-only"}
-        logger.info(f"Detected changes: {changes}")
+    hotfix_model_name = os.getenv("HOTFIX_MODEL_NAME")
+    hotfix_image_tag = os.getenv("HOTFIX_IMAGE_TAG")
+    hotfix_skip_canary = os.getenv("HOTFIX_SKIP_CANARY", "false").lower() == "true"
+    
+    changes = {}
+    
+    if hotfix_model_name:
+        logger.warning(f"HOTFIX MODE active for model {hotfix_model_name}")
+        changes = {hotfix_model_name: "rebuild"}
     else:
-        changes = {"en-hi-indictrans": "ci-only"} # e.g. smoke test only
-        
+        # 1. Detect Changes
+        try:
+            changed_files = cd.get_changed_files("HEAD~1", "HEAD")
+            changes = cd.analyze_changes(changed_files)
+        except Exception as e:
+            logger.warning(f"Failed to detect changes via git: {e}")
+            
+        if not changes:
+            logger.info("No model changes detected.")
+            # For prototype local run without full git history, fallback if mode is full
+            if mode in ("full", "config-only"):
+                logger.info("Fallback: treating en-hi-indictrans as changed for prototype run")
+                changes = {"en-hi-indictrans": "rebuild" if mode == "full" else "config-only"}
+                
     for model_name, change_type in changes.items():
         if change_type == "ci-only":
             logger.info(f"Skipping deploy for {model_name} (ci-only)")
@@ -49,16 +56,14 @@ async def run_pipeline(mode: str, repo_root: Path):
             
         # 2. Plan
         name, image, spec = planner.plan_deployment(model_name)
+        if hotfix_image_tag:
+            image = hotfix_image_tag
+            logger.info(f"Using hotfix image tag: {image}")
+            
         logger.info(f"Planned deploy for {name} with image {image}")
         
         # 3. Deploy
-        if provider_name == "MOCK_NVCF":
-            # Backward compatibility with v1 mock orchestrator
-            fn_id, v_id = await provider.deploy_model(name, image, spec, change_type)
-        else:
-            # v2/v3 Generic Provider implementation
-            v_id = provider.deploy_model(name, image, spec)
-            fn_id = name # GCP uses service name as fn_id essentially
+        fn_id, v_id = await provider.deploy_model(name, image, spec)
             
         # 4. Canary Gate (reading settings from plan)
         import yaml
@@ -69,23 +74,26 @@ async def run_pipeline(mode: str, repo_root: Path):
         if data.get("canary", {}).get("enabled", False):
             canary = data["canary"]
             
-            # If using generic provider, route traffic via the provider's API
-            if provider_name != "MOCK_NVCF":
-                provider.route_traffic(v_id, canary.get("weight", 10))
-            
-            await check_canary_health(
-                model_name=name,
-                fn_id=fn_id,
-                version_id=v_id,
-                image_tag=image,
-                promote_after_seconds=canary.get("promote_after_seconds", 120),
-                rollback_on=canary.get("rollback_on", {})
-            )
-            
-            if provider_name != "MOCK_NVCF":
-                # Assuming health check passed if we reach here (no exception raised)
-                provider.route_traffic(v_id, 100)
-            
+            if hotfix_skip_canary:
+                logger.warning("HOTFIX: Skipping canary health check, promoting immediately to 100%")
+                await provider.promote(fn_id, v_id, name, image)
+            else:
+                # Route initial traffic
+                await provider.route_traffic(fn_id, v_id, canary.get("weight", 10))
+                
+                healthy = await check_canary_health(
+                    model_name=name,
+                    fn_id=fn_id,
+                    version_id=v_id,
+                    image_tag=image,
+                    promote_after_seconds=canary.get("promote_after_seconds", 120),
+                    rollback_on=canary.get("rollback_on", {})
+                )
+                
+                if healthy:
+                    await provider.promote(fn_id, v_id, name, image)
+                    
+    await provider.close()
     logger.info("Pipeline completed.")
 
 def main():

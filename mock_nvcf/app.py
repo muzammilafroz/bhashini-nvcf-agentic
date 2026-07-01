@@ -51,6 +51,10 @@ async def create_function(spec: FunctionSpec, request: Request):
     fn = NvcfFunction(
         id=fn_id,
         name=spec.name,
+        inferenceUrl=spec.inferenceUrl,
+        inferencePort=spec.inferencePort,
+        containerImage=spec.containerImage,
+        apiBodyFormat=spec.apiBodyFormat,
         status=FunctionStatus.ACTIVE,
         createdAt=_now()
     )

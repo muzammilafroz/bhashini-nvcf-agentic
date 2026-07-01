@@ -8,6 +8,41 @@ from pipeline.agents.promote import promote, rollback
 
 logger = logging.getLogger(__name__)
 
+
+async def fetch_metrics_from_router(router_url: str, client: httpx.AsyncClient) -> dict:
+    """Fetch canary metrics from the local FastAPI canary router (v1 / mock mode)."""
+    resp = await client.get(f"{router_url}/__control/state")
+    state = resp.json()
+    return {
+        "p95_latency_ms": state.get("p95_latency_ms", 0.0),
+        "error_rate_pct": state.get("error_rate_pct", 0.0),
+    }
+
+
+async def fetch_metrics_from_prometheus(prom_url: str, client: httpx.AsyncClient) -> dict:
+    """Fetch canary metrics from a real Prometheus instance (v2 / production mode)."""
+    # Error rate: percentage of 5xx responses from Kong
+    err_query = 'rate(kong_http_status{code=~"5.."}[1m]) / rate(kong_http_status[1m]) * 100'
+    resp = await client.get(f"{prom_url}/api/v1/query", params={"query": err_query})
+    data = resp.json()
+    err_rate = 0.0
+    if data.get("data", {}).get("result"):
+        err_rate = float(data["data"]["result"][0]["value"][1])
+
+    # P95 latency from Kong histogram
+    p95_query = 'histogram_quantile(0.95, rate(kong_latency_bucket[1m]))'
+    resp = await client.get(f"{prom_url}/api/v1/query", params={"query": p95_query})
+    data = resp.json()
+    p95 = 0.0
+    if data.get("data", {}).get("result"):
+        p95 = float(data["data"]["result"][0]["value"][1])
+
+    return {
+        "p95_latency_ms": p95,
+        "error_rate_pct": err_rate,
+    }
+
+
 async def check_canary_health(
     model_name: str,
     fn_id: str,
@@ -15,71 +50,51 @@ async def check_canary_health(
     image_tag: str,
     promote_after_seconds: int,
     rollback_on: dict,
-    router_url: str = "http://localhost:8000"
+    router_url: str = "http://localhost:8000",
+    prometheus_url: str | None = None,
 ):
     """
-    Monitors router metrics for `promote_after_seconds`.
+    Monitors canary metrics for `promote_after_seconds`.
     Rolls back immediately if thresholds are breached.
     Promotes if time elapses without breach.
+
+    If `prometheus_url` is provided, metrics are fetched from Prometheus.
+    Otherwise, metrics come from the local canary router's /__control/state endpoint.
     """
     logger.info(f"Starting canary health gate for {model_name}. Window: {promote_after_seconds}s")
-    
+
     start_time = time.time()
-    
-        import os
-        provider_name = os.getenv("CLOUD_PROVIDER", "MOCK_NVCF")
-        
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
         while (time.time() - start_time) < promote_after_seconds:
             try:
-                async with httpx.AsyncClient() as client:
-                    if provider_name == "MOCK_NVCF":
-                        # v1: Query SQLite mock gateway
-                        resp = await client.get(f"{router_url}/__control/state")
-                        state = resp.json()
-                        p95 = state.get("p95_latency_ms", 0.0)
-                        err_rate = state.get("error_rate_pct", 0.0)
-                    else:
-                        # v2/v3: Query Real Prometheus on DigitalOcean
-                        # Assuming DO IP is in router_url for Prometheus e.g., http://142.93.209.191:9090
-                        prom_url = os.getenv("PROMETHEUS_URL", "http://142.93.209.191:9090")
-                        
-                        # Example simplified PromQL for 5xx errors from Kong
-                        query = 'rate(kong_http_status{code=~"5.."}[1m]) / rate(kong_http_status[1m]) * 100'
-                        resp = await client.get(f"{prom_url}/api/v1/query", params={"query": query})
-                        data = resp.json()
-                        err_rate = 0.0
-                        if data.get("data", {}).get("result"):
-                            err_rate = float(data["data"]["result"][0]["value"][1])
-                            
-                        # Simplified P95 latency query from Kong
-                        p95_query = 'histogram_quantile(0.95, rate(kong_latency_bucket[1m]))'
-                        resp = await client.get(f"{prom_url}/api/v1/query", params={"query": p95_query})
-                        data = resp.json()
-                        p95 = 0.0
-                        if data.get("data", {}).get("result"):
-                            p95 = float(data["data"]["result"][0]["value"][1])
+                if prometheus_url:
+                    metrics = await fetch_metrics_from_prometheus(prometheus_url, client)
+                else:
+                    metrics = await fetch_metrics_from_router(router_url, client)
+
+                p95 = metrics["p95_latency_ms"]
+                err_rate = metrics["error_rate_pct"]
 
                 logger.info(f"Canary metrics: p95={p95:.2f}ms, err={err_rate:.2f}%")
-                
+
                 # Check thresholds
                 if "p95_latency_ms" in rollback_on and p95 > rollback_on["p95_latency_ms"]:
                     reason = f"p95 latency {p95:.2f} > {rollback_on['p95_latency_ms']}"
-                    await rollback(model_name, fn_id, version_id, image_tag, reason, router_url)
+                    await rollback(model_name, fn_id, version_id, image_tag, reason, router_url, client)
                     return False
-                    
+
                 if "error_rate_pct" in rollback_on and err_rate > rollback_on["error_rate_pct"]:
                     reason = f"Error rate {err_rate:.2f}% > {rollback_on['error_rate_pct']}%"
-                    await rollback(model_name, fn_id, version_id, image_tag, reason, router_url)
+                    await rollback(model_name, fn_id, version_id, image_tag, reason, router_url, client)
                     return False
-                    
+
             except Exception as e:
-                logger.error(f"Error fetching router/prometheus state: {e}")
-                
-            await asyncio.sleep(2) # Poll every 2s for tests, ~10s for prod
-            
-        # If we made it here, promote!
-        if provider_name == "MOCK_NVCF":
-            await promote(model_name, fn_id, version_id, image_tag, router_url)
-        # Note: If generic provider is used, the orchestrator handles the route_traffic call
-        
-        return True
+                logger.error(f"Error fetching canary metrics: {e}")
+
+            await asyncio.sleep(2)  # Poll every 2s for tests, ~10s for prod
+
+    # If we made it here, promote!
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        await promote(model_name, fn_id, version_id, image_tag, router_url, client)
+    return True

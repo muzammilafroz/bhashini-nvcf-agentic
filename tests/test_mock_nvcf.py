@@ -15,13 +15,19 @@ def test_full_lifecycle():
     headers = {"Authorization": "Bearer mock"}
     
     # 1. Create function
-    spec = {"name": f"test-func-{uuid.uuid4()}"}
+    spec = {
+        "name": f"test-func-{uuid.uuid4()}",
+        "inferenceUrl": "/v2/nvcf/pexec/functions",
+        "inferencePort": 8000,
+        "containerImage": "nvcr.io/test/img:123",
+        "apiBodyFormat": "CUSTOM"
+    }
     resp = client.post("/v2/nvcf/functions", json=spec, headers=headers)
     assert resp.status_code == 201
     fn_id = resp.json()["function"]["id"]
     
     # 2. Create version
-    v_spec = {"name": "v1", "image": "ghcr.io/test/img:123"}
+    v_spec = {"name": "v1", "image": "nvcr.io/test/img:123"}
     resp = client.post(f"/v2/nvcf/functions/{fn_id}/versions", json=v_spec, headers=headers)
     assert resp.status_code == 201
     vid = resp.json()["version"]["id"]
@@ -33,7 +39,8 @@ def test_full_lifecycle():
                 "gpu": "CPU",
                 "minInstances": 1,
                 "maxInstances": 2,
-                "maxRequestConcurrency": 4
+                "maxRequestConcurrency": 4,
+                "regions": ["us-east-1"]
             }
         ]
     }
