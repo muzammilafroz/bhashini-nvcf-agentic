@@ -27,7 +27,7 @@ class NVCFProvider(CloudProvider):
     to the external canary router.
     """
 
-    def __init__(self, mock: bool = True, router_url: str = "http://localhost:8000"):
+    def __init__(self, mock: bool = True, router_url: str = "http://localhost:8001"):
         self.client = NVCFDeployClient(mock=mock)
         self.router_url = router_url
         self._http = httpx.AsyncClient(timeout=10.0)
@@ -44,14 +44,19 @@ class NVCFProvider(CloudProvider):
         v_id = await self.client.create_version(fn_id, version_name, image_uri)
         logger.info(f"[NVCF] Version ID: {v_id}")
 
-        # 3. Build deployment spec from config
-        spec_item = DeploymentSpecItem(
-            gpu=config.get("gpu", {}).get("type", "CPU"),
-            minInstances=config.get("scaling", {}).get("min_instances", 1),
-            maxInstances=config.get("scaling", {}).get("max_instances", 2),
-            maxRequestConcurrency=config.get("scaling", {}).get("concurrency", 4),
-        )
-        spec = DeploymentSpec(deploymentSpecifications=[spec_item])
+        # 3. Use the planner's deployment spec when provided; fall back to the
+        # legacy dict-shaped config so older callers keep working.
+        if hasattr(config, "deploymentSpecifications"):
+            spec = config
+        else:
+            config_data = config.model_dump() if hasattr(config, "model_dump") else config
+            spec_item = DeploymentSpecItem(
+                gpu=config_data.get("gpu", {}).get("type", "CPU"),
+                minInstances=config_data.get("scaling", {}).get("min_instances", 1),
+                maxInstances=config_data.get("scaling", {}).get("max_instances", 2),
+                maxRequestConcurrency=config_data.get("scaling", {}).get("concurrency", 4),
+            )
+            spec = DeploymentSpec(deploymentSpecifications=[spec_item])
 
         # 4. Deploy
         await self.client.deploy(fn_id, v_id, spec)

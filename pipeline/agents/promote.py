@@ -14,7 +14,7 @@ async def promote(
     fn_id: str,
     version_id: str,
     image_tag: str,
-    router_url: str = "http://localhost:8000",
+    router_url: str = "http://localhost:8001",
     client: httpx.AsyncClient | None = None,
 ):
     logger.info(f"PROMOTING {model_name} to 100% traffic")
@@ -42,7 +42,7 @@ async def rollback(
     version_id: str,
     image_tag: str,
     reason: str,
-    router_url: str = "http://localhost:8000",
+    router_url: str = "http://localhost:8001",
     client: httpx.AsyncClient | None = None,
 ):
     logger.warning(f"ROLLING BACK {model_name} to 0% traffic! Reason: {reason}")

@@ -50,7 +50,7 @@ async def check_canary_health(
     image_tag: str,
     promote_after_seconds: int,
     rollback_on: dict,
-    router_url: str = "http://localhost:8000",
+    router_url: str = "http://localhost:8001",
     prometheus_url: str | None = None,
 ):
     """
