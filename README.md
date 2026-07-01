@@ -4,8 +4,8 @@ A multi-phase prototype demonstrating the GitOps deployment-automation loop for 
 
 ## Versions
 
-* **v1 (Current)**: A CPU-only, $0 local prototype. Uses a mock NVCF control plane and a local SQLite-backed canary router. 
-* **v2 (Upcoming)**: Production-like, internet-facing architecture. Uses a DigitalOcean Droplet for the edge (Kong API Gateway & Prometheus Observability) and **Google Cloud Platform (GCP)** as the actual GPU compute provider.
+* **v1**: A CPU-only, $0 local prototype. Uses a mock NVCF control plane and a local SQLite-backed canary router. (Completed in main branch)
+* **v2 (Current)**: Production-like, internet-facing architecture. Uses a DigitalOcean Droplet for the edge (Kong API Gateway & Prometheus Observability) and **Google Cloud Platform (GCP)** as the actual GPU compute provider.
 * **v3 (Planned)**: Full multi-cloud abstraction. Ability to swap between NVCF, GCP, AWS, and Azure seamlessly with minimal manual effort using an Adapter pattern in the deployment pipeline.
 
 ## v1 Architecture (Local Prototype)
@@ -64,3 +64,46 @@ python pipeline/orchestrator.py --mode full
 - `pipeline/`: Agents for diff detection, planning, and deployment.
 - `model_server/`: Actual translation model server.
 - `.agents/skills/`: The Antigravity skills that defined this architecture.
+
+## v2 Architecture (Production Edge & GCP Compute)
+
+For version two, we transition from a local mock environment to a production-ready, internet-facing distributed architecture.
+
+```mermaid
+graph TD
+    Client((Client App)) -->|api.contentfor.me| Edge[Kong API Gateway]
+    
+    subgraph DigitalOcean Droplet (The Edge & Control Plane)
+      Edge
+      Prometheus[(Prometheus TSDB)]
+      Grafana[Grafana Dashboards]
+      
+      Edge -->|Metrics| Prometheus
+      Grafana -->|Query| Prometheus
+    end
+    
+    subgraph Multi-Cloud Compute Layer
+      GCP[GCP Vertex AI / Cloud Run]
+      AWS[AWS SageMaker]
+      NVCF[NVIDIA Cloud Functions]
+    end
+    
+    Edge -->|Weight: 90%| GCP
+    Edge -.->|Weight: 10% (Canary)| GCP
+    
+    subgraph GitHub Actions (CI/CD Pipeline)
+      CD[Change Detector] --> Planner[Deployment Planner]
+      Planner --> Adapter[Cloud Provider Adapter Layer]
+      Adapter -->|API| GCP
+      
+      Gate[Canary Health Gate] -->|Query Metrics| Prometheus
+      Gate -->|Update Routes| Edge
+    end
+```
+
+### Key upgrades in v2:
+1. **Compute Adapter Pattern**: Unified `CloudProvider` base class implemented for GCP (Vertex AI / Cloud Run) and NVCF.
+2. **Production Edge (DigitalOcean)**: Real **Kong API Gateway** handles dynamic 90/10 traffic splitting, completely hiding the backends.
+3. **Enterprise Observability**: Real **Prometheus** scrapes network metrics from Kong, and **Grafana** visualizes model performance.
+4. **Automated Health Gate**: The `canary_health.py` agent queries Prometheus using PromQL to determine promotion or automatic rollback.
+
