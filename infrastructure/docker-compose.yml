@@ -1,15 +1,17 @@
 version: '3.8'
 
 services:
-  # The API Gateway (Kong)
+  # The Database (Kong config + TimescaleDB for events)
   kong-db:
-    image: postgres:13
+    image: timescale/timescaledb:latest-pg13
     environment:
       POSTGRES_USER: kong
       POSTGRES_DB: kong
       POSTGRES_PASSWORD: kong_pass
     volumes:
       - kong_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432" # Exposed so your local agent can write events to TimescaleDB
     networks:
       - edge_net
 
@@ -44,6 +46,22 @@ services:
       - "8001:8001"
     depends_on:
       - kong-migrations
+    networks:
+      - edge_net
+
+  # Auto-configure Kong Prometheus plugin
+  kong-init:
+    image: curlimages/curl:latest
+    command: >
+      sh -c "
+      echo 'Waiting for Kong to start...' &&
+      sleep 10 &&
+      curl -s -X POST http://kong:8001/plugins/ \
+        --data 'name=prometheus' &&
+      echo '\nKong Prometheus plugin enabled.'
+      "
+    depends_on:
+      - kong
     networks:
       - edge_net
 

@@ -56,9 +56,45 @@ class GCPProvider(CloudProvider):
         return "ACTIVE"
         
     def route_traffic(self, deployment_id, weight):
-        # We don't use Cloud Run's native traffic splitting because we have Kong at the edge!
-        # Kong handles routing across clouds. So here, we just tell Kong to route to the Cloud Run URL.
-        print(f"[GCP-KONG] Updating Kong Gateway to route {weight}% of traffic to GCP service {deployment_id}")
+        import httpx
+        kong_admin_url = os.getenv("KONG_ADMIN_URL", "http://142.93.209.191:8001")
+        
+        print(f"[GCP-KONG] Updating Kong Gateway at {kong_admin_url} to route {weight}% of traffic to GCP service {deployment_id}")
+        
+        # 1. Fetch the Cloud Run URL for the deployment
+        try:
+            cmd = ["gcloud", "run", "services", "describe", deployment_id, f"--region={self.region}", f"--project={self.project_id}", "--format=json"]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            output = json.loads(result.stdout)
+            service_url = output.get("status", {}).get("url")
+            if not service_url:
+                raise ValueError("Could not determine service URL")
+        except Exception as e:
+            print(f"[GCP-KONG] Failed to fetch service URL: {e}")
+            service_url = f"https://{deployment_id}-fake.run.app"
+            
+        # Strip https:// from URL for Kong target
+        target_host = service_url.replace("https://", "").replace("http://", "")
+            
+        # 2. Configure Kong Upstream (assuming upstream is named 'indictrans-upstream')
+        upstream_name = "indictrans-upstream"
+        try:
+            httpx.put(f"{kong_admin_url}/upstreams/{upstream_name}", json={"name": upstream_name})
+            
+            # 3. Add/Update Target with weight
+            target_data = {"target": f"{target_host}:443", "weight": int(weight)}
+            httpx.post(f"{kong_admin_url}/upstreams/{upstream_name}/targets", json=target_data)
+            print(f"[GCP-KONG] Successfully configured Kong target {target_host} with weight {weight}")
+            
+            # 4. Ensure a Service and Route exists that points to this upstream
+            service_data = {"name": "indictrans-service", "host": upstream_name, "port": 443, "protocol": "https"}
+            httpx.put(f"{kong_admin_url}/services/indictrans-service", json=service_data)
+            
+            route_data = {"name": "indictrans-route", "paths": ["/infer"], "strip_path": False}
+            httpx.put(f"{kong_admin_url}/services/indictrans-service/routes/indictrans-route", json=route_data)
+            
+        except Exception as e:
+            print(f"[GCP-KONG ERROR] Failed to configure Kong: {e}")
         
     def delete_deployment(self, deployment_id):
         print(f"[GCP] Deleting Cloud Run service {deployment_id}")
