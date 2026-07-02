@@ -22,6 +22,7 @@ def init_db():
         
     try:
         cursor = conn.cursor()
+        
         # Create standard table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS deployment_events (
@@ -40,22 +41,25 @@ def init_db():
                 wer_delta REAL
             )
         """)
+        conn.commit() # Commit the table creation before attempting to create the hypertable
         
-        # Check if it's already a hypertable
-        cursor.execute("""
-            SELECT count(*) 
-            FROM _timescaledb_catalog.hypertable 
-            WHERE table_name = 'deployment_events'
-        """)
-        is_hypertable = cursor.fetchone()[0] > 0
-        
-        # Convert to TimescaleDB hypertable if not already
-        if not is_hypertable:
-            cursor.execute("SELECT create_hypertable('deployment_events', 'ts', if_not_exists => TRUE)")
+        # Attempt to convert to TimescaleDB hypertable if possible
+        try:
+            cursor.execute("""
+                SELECT count(*) 
+                FROM _timescaledb_catalog.hypertable 
+                WHERE table_name = 'deployment_events'
+            """)
+            is_hypertable = cursor.fetchone()[0] > 0
             
-        conn.commit()
+            if not is_hypertable:
+                cursor.execute("SELECT create_hypertable('deployment_events', 'ts', if_not_exists => TRUE)")
+            conn.commit()
+        except Exception as e:
+            logger.info(f"TimescaleDB extension not available or active, falling back to standard Postgres table: {e}")
+            conn.rollback()
     except Exception as e:
-        logger.error(f"Error initializing TimescaleDB: {e}")
+        logger.error(f"Error initializing database: {e}")
     finally:
         if conn:
             cursor.close()

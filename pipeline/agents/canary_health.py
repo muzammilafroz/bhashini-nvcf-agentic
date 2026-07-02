@@ -81,13 +81,11 @@ async def check_canary_health(
                 # Check thresholds
                 if "p95_latency_ms" in rollback_on and p95 > rollback_on["p95_latency_ms"]:
                     reason = f"p95 latency {p95:.2f} > {rollback_on['p95_latency_ms']}"
-                    await rollback(model_name, fn_id, version_id, image_tag, reason, router_url, client)
-                    return False
+                    return False, reason
 
                 if "error_rate_pct" in rollback_on and err_rate > rollback_on["error_rate_pct"]:
                     reason = f"Error rate {err_rate:.2f}% > {rollback_on['error_rate_pct']}%"
-                    await rollback(model_name, fn_id, version_id, image_tag, reason, router_url, client)
-                    return False
+                    return False, reason
 
             except Exception as e:
                 logger.error(f"Error fetching canary metrics: {e}")
@@ -95,6 +93,4 @@ async def check_canary_health(
             await asyncio.sleep(2)  # Poll every 2s for tests, ~10s for prod
 
     # If we made it here, promote!
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        await promote(model_name, fn_id, version_id, image_tag, router_url, client)
-    return True
+    return True, None

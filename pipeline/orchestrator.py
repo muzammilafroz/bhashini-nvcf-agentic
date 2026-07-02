@@ -85,17 +85,24 @@ async def run_pipeline(mode: str, repo_root: Path):
                 # Route initial traffic
                 await provider.route_traffic(fn_id, v_id, canary.get("weight", 10))
                 
-                healthy = await check_canary_health(
+                kong_admin = os.getenv("KONG_ADMIN_URL", "http://142.93.209.191:8001")
+                prom_url = kong_admin.replace(":8001", ":9090") # derive prom url
+                
+                healthy, reason = await check_canary_health(
                     model_name=name,
                     fn_id=fn_id,
                     version_id=v_id,
                     image_tag=image,
                     promote_after_seconds=canary.get("promote_after_seconds", 120),
-                    rollback_on=canary.get("rollback_on", {})
+                    rollback_on=canary.get("rollback_on", {}),
+                    router_url=kong_admin,
+                    prometheus_url=prom_url
                 )
                 
                 if healthy:
                     await provider.promote(fn_id, v_id, name, image)
+                else:
+                    await provider.rollback(fn_id, v_id, name, image, reason)
                     
     await provider.close()
     logger.info("Pipeline completed.")
