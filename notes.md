@@ -1,6 +1,8 @@
 # Bhashini — NVCF Agentic Deployment Platform: Complete Project Notes
 
 > **Purpose of this document**: This file explains the *entire project* — what it is, why it exists, how every piece works, what's built today, and where it goes next. Written so you can explain the project to anyone from a non-technical manager to a senior MLOps engineer.
+>
+> **Current status**: v2 is the active architecture. v1 sections below are historical/local-prototype context; the production-like path uses Kong, Prometheus/Grafana, TimescaleDB, and GCP Cloud Run.
 
 ---
 
@@ -8,8 +10,8 @@
 
 1. [The Problem We're Solving](#1-the-problem-were-solving)
 2. [The One Critical Discovery](#2-the-one-critical-discovery)
-3. [Complete Architecture — Current State (v1)](#3-complete-architecture--current-state-v1)
-4. [Complete Architecture — Fast-Forward Vision (v2 + v3)](#4-complete-architecture--fast-forward-vision-v2--v3)
+3. [Complete Architecture — Historical Local Prototype (v1)](#3-complete-architecture--historical-local-prototype-v1)
+4. [Complete Architecture — Current v2 + Planned v3](#4-complete-architecture--current-v2--planned-v3)
 5. [How Every Component Works (The Walkthrough)](#5-how-every-component-works-the-walkthrough)
 6. [File-by-File Map](#6-file-by-file-map)
 7. [Key Design Decisions & Rationale](#7-key-design-decisions--rationale)
@@ -102,13 +104,13 @@ Real canary on NVCF = **you build and operate an external router** — your own 
 
 ---
 
-## 3. Complete Architecture — Current State (v1)
+## 3. Complete Architecture — Historical Local Prototype (v1)
 
-The full system as it exists today — every component, every connection, every data flow:
+The v1 local prototype is preserved for context and offline testing. The active v2 deployment path is described in the next section.
 
 ```mermaid
 ---
-title: "COMPLETE ARCHITECTURE — CURRENT STATE (v1 Prototype)"
+title: "COMPLETE ARCHITECTURE — HISTORICAL LOCAL STATE (v1 Prototype)"
 ---
 flowchart TB
     %% ===== SOURCE OF TRUTH =====
@@ -246,9 +248,9 @@ flowchart TB
 
 ---
 
-## 4. Complete Architecture — Fast-Forward Vision (v2 + v3)
+## 4. Complete Architecture — Current v2 + Planned v3
 
-Where this project is headed — from local prototype to full multi-cloud production platform:
+The active v2 path uses a DigitalOcean-hosted Kong/Prometheus/Grafana/Timescale edge and GCP Cloud Run as the compute provider. v3 expands the same provider interface to additional clouds.
 
 ```mermaid
 ---

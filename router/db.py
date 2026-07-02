@@ -1,14 +1,25 @@
-import os
-import psycopg2
 import datetime
 import logging
+import os
+
+try:
+    import psycopg2
+except ImportError:  # pragma: no cover - exercised only in minimal local envs
+    psycopg2 = None
 
 logger = logging.getLogger(__name__)
 
-# Default to the Droplet's PostgreSQL/TimescaleDB
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://kong:kong_pass@142.93.209.191:5432/kong")
+DATABASE_URL = os.getenv("DATABASE_URL")
+_initialized = False
 
 def get_connection():
+    if not DATABASE_URL:
+        logger.info("DATABASE_URL is not set; deployment event logging is disabled")
+        return None
+    if psycopg2 is None:
+        logger.warning("psycopg2 is not installed; deployment event logging is disabled")
+        return None
+
     try:
         return psycopg2.connect(DATABASE_URL)
     except Exception as e:
@@ -16,13 +27,25 @@ def get_connection():
         return None
 
 def init_db():
+    global _initialized
+    if _initialized:
+        return
+
     conn = get_connection()
     if not conn:
         return
-        
+
+    cursor = None
     try:
         cursor = conn.cursor()
-        
+
+        try:
+            cursor.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE")
+            conn.commit()
+        except Exception as e:
+            logger.info(f"TimescaleDB extension not available, using standard Postgres table: {e}")
+            conn.rollback()
+
         # Create standard table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS deployment_events (
@@ -41,8 +64,8 @@ def init_db():
                 wer_delta REAL
             )
         """)
-        conn.commit() # Commit the table creation before attempting to create the hypertable
-        
+        conn.commit()
+
         # Attempt to convert to TimescaleDB hypertable if possible
         try:
             cursor.execute("""
@@ -58,11 +81,13 @@ def init_db():
         except Exception as e:
             logger.info(f"TimescaleDB extension not available or active, falling back to standard Postgres table: {e}")
             conn.rollback()
+        _initialized = True
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
     finally:
-        if conn:
+        if cursor:
             cursor.close()
+        if conn:
             conn.close()
 
 def log_event(
@@ -78,11 +103,14 @@ def log_event(
     error_rate: float | None = None,
     wer_delta: float | None = None
 ):
+    init_db()
+
     conn = get_connection()
     if not conn:
         logger.warning("Skipping event logging due to missing DB connection")
         return
-        
+
+    cursor = None
     try:
         cursor = conn.cursor()
         ts = datetime.datetime.now(datetime.timezone.utc)
@@ -97,9 +125,7 @@ def log_event(
     except Exception as e:
         logger.error(f"Error logging event to TimescaleDB: {e}")
     finally:
-        if conn:
+        if cursor:
             cursor.close()
+        if conn:
             conn.close()
-
-# Initialize on import
-init_db()

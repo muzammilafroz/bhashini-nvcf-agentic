@@ -4,8 +4,6 @@ import time
 
 import httpx
 
-from pipeline.agents.promote import promote, rollback
-
 logger = logging.getLogger(__name__)
 
 
@@ -22,7 +20,7 @@ async def fetch_metrics_from_router(router_url: str, client: httpx.AsyncClient) 
 async def fetch_metrics_from_prometheus(prom_url: str, client: httpx.AsyncClient) -> dict:
     """Fetch canary metrics from a real Prometheus instance (v2 / production mode)."""
     # Error rate: percentage of 5xx responses from Kong
-    err_query = 'rate(kong_http_status{code=~"5.."}[1m]) / rate(kong_http_status[1m]) * 100'
+    err_query = 'sum(rate(kong_http_requests_total{code=~"5.."}[1m])) / sum(rate(kong_http_requests_total[1m])) * 100'
     resp = await client.get(f"{prom_url}/api/v1/query", params={"query": err_query})
     data = resp.json()
     err_rate = 0.0
@@ -30,7 +28,7 @@ async def fetch_metrics_from_prometheus(prom_url: str, client: httpx.AsyncClient
         err_rate = float(data["data"]["result"][0]["value"][1])
 
     # P95 latency from Kong histogram
-    p95_query = 'histogram_quantile(0.95, rate(kong_latency_bucket[1m]))'
+    p95_query = 'histogram_quantile(0.95, sum(rate(kong_request_latency_ms_bucket[1m])) by (le))'
     resp = await client.get(f"{prom_url}/api/v1/query", params={"query": p95_query})
     data = resp.json()
     p95 = 0.0

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # The Database (Kong config + TimescaleDB for events)
   kong-db:
@@ -11,7 +9,7 @@ services:
     volumes:
       - kong_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432" # Exposed so your local agent can write events to TimescaleDB
+      - "127.0.0.1:5432:5432" # Access remotely through SSH/VPN tunnel, not the public internet
     networks:
       - edge_net
 
@@ -43,7 +41,7 @@ services:
       KONG_ADMIN_LISTEN: 0.0.0.0:8001
     ports:
       - "8000:8000"
-      - "8001:8001"
+      - "127.0.0.1:8001:8001" # Admin API must not be public
     depends_on:
       - kong-migrations
     networks:
@@ -56,9 +54,15 @@ services:
       sh -c "
       echo 'Waiting for Kong to start...' &&
       sleep 10 &&
-      curl -s -X POST http://kong:8001/plugins/ \
-        --data 'name=prometheus' &&
-      echo '\nKong Prometheus plugin enabled.'
+      if curl -sf http://kong:8001/plugins | grep -q '\"name\":\"prometheus\"'; then
+        echo 'Kong Prometheus plugin already enabled.';
+      else
+        curl -sf -X POST http://kong:8001/plugins/ \
+          --data 'name=prometheus' \
+          --data 'config.status_code_metrics=true' \
+          --data 'config.latency_metrics=true';
+        echo 'Kong Prometheus plugin enabled.';
+      fi
       "
     depends_on:
       - kong

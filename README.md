@@ -5,8 +5,8 @@ A multi-phase prototype demonstrating the GitOps deployment-automation loop for 
 ## Versions
 
 * **v1**: A CPU-only, $0 local prototype. Uses a mock NVCF control plane and a local SQLite-backed canary router. (Completed in main branch)
-* **v2 (Current)**: Production-like, internet-facing architecture. Uses a DigitalOcean Droplet for the edge (Kong API Gateway & Prometheus Observability) and **Google Cloud Platform (GCP)** as the actual GPU compute provider.
-* **v3 (Planned)**: Full multi-cloud abstraction. Ability to swap between NVCF, GCP, AWS, and Azure seamlessly with minimal manual effort using an Adapter pattern in the deployment pipeline.
+* **v2 (Current)**: Production-like, internet-facing architecture. Uses a DigitalOcean Droplet for the edge (Kong API Gateway, Prometheus, Grafana, TimescaleDB) and **Google Cloud Platform (GCP Cloud Run)** as the active compute provider.
+* **v3 (Planned)**: Full multi-cloud abstraction. AWS/Azure/NVCF providers remain stubs or future adapters until credentials and target platforms are available.
 
 ## v1 Architecture (Local Prototype)
 
@@ -46,7 +46,7 @@ This project requires Python 3.12+.
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .\.venv\Scripts\activate
 pip install -r model_server/requirements.txt
-pip install fastapi uvicorn httpx pydantic pyyaml jsonschema gitpython pytest
+pip install -r requirements.txt
 
 # 2. Start mock services in background
 uvicorn mock_nvcf.app:app --port 8000 &
@@ -60,7 +60,7 @@ python pipeline/orchestrator.py --mode full
 
 - `models/`: Declarative config (`model.yaml`) for each model.
 - `mock_nvcf/`: FastAPI mock of the NVCF REST API.
-- `router/`: External traffic-split gateway and metrics database.
+- `router/`: v1 FastAPI traffic router plus the shared deployment event persistence layer.
 - `pipeline/`: Agents for diff detection, planning, and deployment.
 - `model_server/`: Actual translation model server.
 - `.agents/skills/`: The Antigravity skills that defined this architecture.
@@ -102,8 +102,14 @@ graph TD
 ```
 
 ### Key upgrades in v2:
-1. **Compute Adapter Pattern**: Unified `CloudProvider` base class implemented for GCP (Vertex AI / Cloud Run) and NVCF.
+1. **Compute Adapter Pattern**: Unified `CloudProvider` base class with GCP as the active Phase 2 provider; AWS is intentionally a stub.
 2. **Production Edge (DigitalOcean)**: Real **Kong API Gateway** handles dynamic 90/10 traffic splitting, completely hiding the backends.
 3. **Enterprise Observability**: Real **Prometheus** scrapes network metrics from Kong, and **Grafana** visualizes model performance.
 4. **Automated Health Gate**: The `canary_health.py` agent queries Prometheus using PromQL to determine promotion or automatic rollback.
 
+## v2 Operational Notes
+
+- Do not expose Kong Admin (`8001`) or Postgres/Timescale (`5432`) publicly. The Compose file binds them to `127.0.0.1`; use SSH/VPN tunnels for CI or operator access.
+- Set `KONG_STABLE_TARGET_URL` before partial canary traffic. Without a stable backend, the GCP provider intentionally refuses 1-99% rollout.
+- Set `PROMETHEUS_URL` explicitly for production canary checks. Local/mock mode can omit it and use the v1 router metrics endpoint.
+- Set `DATABASE_URL` only where deployment events should be persisted. Local tests leave it unset to avoid writing to a live database.

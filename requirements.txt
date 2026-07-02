@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+httpx
+pydantic
+pyyaml
+jsonschema
+gitpython
+python-dotenv
+psycopg2-binary
+pytest
