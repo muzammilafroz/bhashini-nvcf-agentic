@@ -19,8 +19,9 @@ class GCPProvider(CloudProvider):
         service_name = f"bhashini-{model_id.replace('_', '-')}"
         source_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "model_server"))
         
+        gcloud_bin = "gcloud.cmd" if os.name == "nt" else "gcloud"
         cmd = [
-            "gcloud", "run", "deploy", service_name,
+            gcloud_bin, "run", "deploy", service_name,
             f"--source={source_dir}",
             f"--region={self.region}",
             f"--project={self.project_id}",
@@ -61,8 +62,9 @@ class GCPProvider(CloudProvider):
         
         print(f"[GCP-KONG] Updating Kong Gateway at {kong_admin_url} to route {weight}% of traffic to GCP service {fn_id}")
         
+        gcloud_bin = "gcloud.cmd" if os.name == "nt" else "gcloud"
         try:
-            cmd = ["gcloud", "run", "services", "describe", fn_id, f"--region={self.region}", f"--project={self.project_id}", "--format=json"]
+            cmd = [gcloud_bin, "run", "services", "describe", fn_id, f"--region={self.region}", f"--project={self.project_id}", "--format=json"]
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             output = json.loads(result.stdout)
             service_url = output.get("status", {}).get("url")
@@ -97,8 +99,9 @@ class GCPProvider(CloudProvider):
         
     async def delete_deployment(self, fn_id, version_id):
         print(f"[GCP] Deleting Cloud Run service {fn_id}")
+        gcloud_bin = "gcloud.cmd" if os.name == "nt" else "gcloud"
         cmd = [
-            "gcloud", "run", "services", "delete", fn_id,
+            gcloud_bin, "run", "services", "delete", fn_id,
             f"--region={self.region}",
             f"--project={self.project_id}",
             "--quiet"
